@@ -42,7 +42,7 @@
     padding:0 28px;
   }
 
-  /* ---------- Nav ---------- */
+
   nav{
     position:sticky; top:0; z-index:50;
     background:rgba(13,17,23,0.85);
@@ -70,7 +70,7 @@
     height:2px; background:var(--accent);
   }
 
-  /* ---------- Hero ---------- */
+ 
   header.hero{
     padding:110px 0 90px;
     border-bottom:1px solid var(--line);
@@ -199,7 +199,6 @@
   }
   .btn-outline:hover{ border-color:var(--accent-2); color:var(--accent-2); }
 
-  /* ---------- Section shared ---------- */
   section{ padding:80px 0; border-bottom:1px solid var(--line); }
   .sec-head{
     display:flex; align-items:baseline; gap:14px;
@@ -233,7 +232,7 @@
     font-size:28px; font-weight:700; letter-spacing:-0.01em;
   }
 
-  /* generic reveal-on-scroll target */
+
   .reveal{
     opacity:0;
     transform:translateY(14px);
@@ -241,7 +240,7 @@
   }
   .reveal.in-view{ opacity:1; transform:translateY(0); }
 
-  /* ---------- About ---------- */
+
   .about-grid{
     display:grid;
     grid-template-columns:1.3fr 1fr;
@@ -257,7 +256,7 @@
   }
   .fact-row span:last-child{ color:var(--ink); }
 
-  /* ---------- Skills ---------- */
+ 
   .skill-groups{
     display:grid;
     grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));
@@ -291,7 +290,7 @@
     color:var(--accent-3);
   }
 
-  /* ---------- Hobbies ---------- */
+
   .hobby-grid{
     display:grid;
     grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));
@@ -312,7 +311,6 @@
   }
   .hobby-name{ font-weight:600; font-size:15px; }
 
-  /* ---------- Projects ---------- */
   .project{
     border:1px solid var(--line);
     border-radius:10px;
@@ -344,7 +342,7 @@
     padding:4px 10px; border-radius:20px;
   }
 
-  /* ---------- Education ---------- */
+
   .edu-item{
     display:grid;
     grid-template-columns:120px 1fr;
@@ -357,7 +355,7 @@
   .edu-inst{ font-weight:600; font-size:15.5px; margin-bottom:4px; }
   .edu-detail{ color:var(--ink-dim); font-size:14px; }
 
-  /* ---------- Contact ---------- */
+
   .contact-sec{ border-bottom:none; text-align:center; padding:90px 0 70px; }
   .contact-sec h2{
     font-size:clamp(28px,4vw,40px);
@@ -611,7 +609,7 @@
 <footer>© 2026 Ismam Arafat Pranto — built with HTML &amp; CSS</footer>
 
 <script>
-  // ---------- Typewriter effect on role line ----------
+ 
   (function(){
     var target = document.getElementById('typewriter');
     if(!target) return;
@@ -649,7 +647,7 @@
     setTimeout(tick, 900);
   })();
 
-  // ---------- Scroll reveal ----------
+
   (function(){
     var targets = document.querySelectorAll('.reveal, .sec-head');
     if(!('IntersectionObserver' in window)){
@@ -667,7 +665,7 @@
     targets.forEach(function(el){ io.observe(el); });
   })();
 
-  // ---------- Active nav link on scroll ----------
+
   (function(){
     var sections = document.querySelectorAll('section[id]');
     var links = document.querySelectorAll('.navlinks a');
