@@ -65,13 +65,6 @@
 
   <div id="hint">Open hand = grow · Pinch = shrink · Make a fist = fire mode · Move fast = colors shift</div>
 
-  <div id="errorBox">
-    <b>Camera didn't start</b>
-    <div>এই preview sandbox-এ camera access block হতে পারে.<br>
-    HTML file টা download করে সরাসরি ব্রাউজারে (Chrome/Edge) খুললে camera permission normally কাজ করবে.</div>
-  </div>
-</div>
-
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 <script>
 (function () {
@@ -83,7 +76,7 @@
   const resetBtn = document.getElementById('resetBtn');
   const errorBox = document.getElementById('errorBox');
 
-  // offscreen buffer for particles/skeleton so they can trail independently of the video feed
+
   const pCanvas = document.createElement('canvas');
   const pCtx = pCanvas.getContext('2d');
 
@@ -104,7 +97,7 @@
   window.addEventListener('resize', resize);
   resize();
 
-  // ---------- Particle sphere setup ----------
+
   const N = 1400;
   function fibonacciSphere(n) {
     const pts = [];
@@ -126,17 +119,17 @@
   }
   const particles = fibonacciSphere(N);
 
-  // ---------- Motion / color state ----------
+
   let target = { x: 0, y: 0 };
   let smoothTarget = { x: 0, y: 0 };
   let prevSmoothTarget = { x: 0, y: 0 };
   let targetRadius = 90;
   let smoothRadius = 90;
-  let energy = 0;          // 0 idle .. 1 fully active (affects brightness/size)
+  let energy = 0;         
   let smoothEnergy = 0;
-  let gestureHue = 260;    // target hue driven by current gesture
-  let currentHue = 260;    // smoothed, displayed hue
-  let hueDrift = 0;        // extra spin added by fast hand movement
+  let gestureHue = 260;    
+  let currentHue = 260;    
+  let hueDrift = 0;       
   let handsVisible = 0;
   let rotAngle = 0;
 
@@ -160,7 +153,7 @@
     return (a + diff * t + 360) % 360;
   }
 
-  // ---------- MediaPipe Hands ----------
+
   let hands, camStream, running = false, loopId = null;
 
   function setupHands() {
@@ -177,7 +170,7 @@
   }
 
   function toScreen(lm) {
-    // mirror horizontally for a natural "mirror" feel
+
     return { x: (1 - lm.x) * cw, y: lm.y * ch };
   }
 
@@ -197,7 +190,7 @@
       targetRadius = clamp(spread * 0.55, 50, 280);
       energy = 1;
       const spreadNorm = clamp(spread / (cw * 0.85), 0, 1);
-      gestureHue = mapRange(spreadNorm, 0, 1, 140, 320); // green -> magenta as hands pull apart
+      gestureHue = mapRange(spreadNorm, 0, 1, 140, 320); 
       lastHandPoints = [a, b];
       statusEl.textContent = 'Tracking 2 hands — pull apart to grow';
     } else if (list.length === 1) {
@@ -214,7 +207,7 @@
       const curl = 1 - clamp(avgTipDist / (handSpan * 1.9), 0, 1); // 0 open .. 1 fist
 
       if (curl > 0.55) {
-        // fist -> compact fireball
+       
         targetRadius = clamp(mapRange(curl, 0.55, 0.9, 90, 40), 35, 95);
         gestureHue = mapRange(curl, 0.55, 0.9, 40, 5); // orange -> red
         energy = 1;
@@ -222,7 +215,7 @@
       } else {
         targetRadius = clamp(mapRange(ratio, 0.15, 1.3, 45, 220), 45, 220);
         energy = clamp(mapRange(ratio, 0.15, 1.3, 0.15, 1), 0, 1);
-        gestureHue = mapRange(ratio, 0.15, 1.3, 190, 280); // cyan (pinched) -> purple (open)
+        gestureHue = mapRange(ratio, 0.15, 1.3, 190, 280); 
         statusEl.textContent = 'Tracking 1 hand — pinch to shrink, spread to grow';
       }
       lastHandPoints = [p];
@@ -273,7 +266,7 @@
     loopId = requestAnimationFrame(detectLoop);
   }
 
-  // ---------- drawing helpers ----------
+
   function drawVideoBackground() {
     const vw = video.videoWidth, vh = video.videoHeight;
     if (!vw || !vh) return false;
@@ -320,7 +313,7 @@
     });
   }
 
-  // ---------- main render loop ----------
+ 
   let lastT = performance.now();
   function render(t) {
     const dt = Math.min(0.05, (t - lastT) / 1000);
@@ -334,7 +327,7 @@
     smoothRadius += (targetRadius - smoothRadius) * lerp;
     smoothEnergy += (energy - smoothEnergy) * lerp;
 
-    // fast hand movement adds extra hue spin -> colors shift as you wave your hand
+   
     const speed = dist(smoothTarget, prevSmoothTarget) / Math.max(dt, 0.001);
     const driftSpeedFactor = clamp(speed / 900, 0, 1);
     hueDrift += dt * driftSpeedFactor * 220;
@@ -344,21 +337,21 @@
 
     rotAngle += dt * (0.25 + smoothEnergy * 0.5);
 
-    // 1. background: face if camera running, else deep space
+   
     const hasVideo = running && drawVideoBackground();
     if (!hasVideo) {
       ctx.fillStyle = '#05040a';
       ctx.fillRect(0, 0, cw, ch);
     }
 
-    // 2. fade the particle buffer (keeps it transparent so it composites over the video)
+   
     pCtx.save();
     pCtx.globalCompositeOperation = 'destination-out';
     pCtx.fillStyle = 'rgba(0,0,0,0.16)';
     pCtx.fillRect(0, 0, cw, ch);
     pCtx.restore();
 
-    // 3. draw particle sphere onto the buffer
+  
     const cosA = Math.cos(rotAngle), sinA = Math.sin(rotAngle);
     const sorted = particles.map(p => {
       const rx = p.x * cosA - p.z * sinA;
@@ -386,7 +379,6 @@
     }
     pCtx.restore();
 
-    // glow core
     const grad = pCtx.createRadialGradient(
       smoothTarget.x, smoothTarget.y, 0,
       smoothTarget.x, smoothTarget.y, smoothRadius * 0.9
@@ -400,7 +392,7 @@
 
     if (lastHandPoints) drawSkeleton(pCtx, lastHandPoints);
 
-    // 4. composite particle buffer over the video/background
+ 
     ctx.drawImage(pCanvas, 0, 0, cw, ch);
 
     requestAnimationFrame(render);
