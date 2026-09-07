@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand Particle Storm</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #05040a;
+    font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
+  }
+  #stage { position: relative; width: 100vw; height: 100vh; }
+  video { display: none; }
+  canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+
+  #ui {
+    position: absolute; top: 18px; left: 18px; right: 18px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    z-index: 5; pointer-events: none;
+  }
+  #title { color: #fff; font-size: 18px; font-weight: 700; letter-spacing: 0.5px;
+    text-shadow: 0 0 14px rgba(150,110,255,0.85); }
+  #status { color: #e6ddff; font-size: 12.5px; margin-top: 6px; opacity: 0.9;
+    text-shadow: 0 0 6px rgba(0,0,0,0.8); }
+
+  #controls { pointer-events: auto; display: flex; gap: 8px; }
+  button {
+    background: rgba(255,255,255,0.10); border: 1px solid rgba(180,150,255,0.45);
+    color: #f0edff; padding: 9px 16px; border-radius: 22px; font-size: 12.5px;
+    cursor: pointer; backdrop-filter: blur(6px); transition: background .2s, transform .15s;
+  }
+  button:hover { background: rgba(150,110,255,0.28); }
+  button:active { transform: scale(0.96); }
+
+  #hint {
+    position: absolute; bottom: 20px; left: 0; right: 0; text-align: center;
+    color: rgba(255,255,255,0.7); font-size: 12px; z-index: 5; pointer-events: none;
+    padding: 0 16px; text-shadow: 0 0 6px rgba(0,0,0,0.9);
+  }
+  #errorBox {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px; text-align: center; color: #ffd9d9;
+    background: rgba(5,4,10,0.92); z-index: 10; padding: 24px;
+  }
+  #errorBox b { color: #fff; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <div id="ui">
+    <div>
+      <div id="title">✨ HAND PARTICLE STORM</div>
+      <div id="status">Camera off — tap Start</div>
+    </div>
+    <div id="controls">
+      <button id="camBtn">Start Camera</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+  </div>
+
+  <div id="hint">Open hand = grow · Pinch = shrink · Make a fist = fire mode · Move fast = colors shift</div>
+
+  <div id="errorBox">
+    <b>Camera didn't start</b>
+    <div>এই preview sandbox-এ camera access block হতে পারে.<br>
+    HTML file টা download করে সরাসরি ব্রাউজারে (Chrome/Edge) খুললে camera permission normally কাজ করবে.</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script>
+(function () {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const camBtn = document.getElementById('camBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const errorBox = document.getElementById('errorBox');
+
+  // offscreen buffer for particles/skeleton so they can trail independently of the video feed
+  const pCanvas = document.createElement('canvas');
+  const pCtx = pCanvas.getContext('2d');
+
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let cw = 0, ch = 0;
+
+  function resize() {
+    cw = window.innerWidth;
+    ch = window.innerHeight;
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    pCanvas.width = cw * dpr;
+    pCanvas.height = ch * dpr;
+    pCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Particle sphere setup ----------
+  const N = 1400;
+  function fibonacciSphere(n) {
+    const pts = [];
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < n; i++) {
+      const y = 1 - (i / (n - 1)) * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const theta = golden * i;
+      pts.push({
+        x: Math.cos(theta) * r,
+        y: y,
+        z: Math.sin(theta) * r,
+        jitterPhase: Math.random() * Math.PI * 2,
+        jitterAmt: 0.04 + Math.random() * 0.12,
+        twinklePhase: Math.random() * Math.PI * 2
+      });
+    }
+    return pts;
+  }
+  const particles = fibonacciSphere(N);
+
+  // ---------- Motion / color state ----------
+  let target = { x: 0, y: 0 };
+  let smoothTarget = { x: 0, y: 0 };
+  let prevSmoothTarget = { x: 0, y: 0 };
+  let targetRadius = 90;
+  let smoothRadius = 90;
+  let energy = 0;          // 0 idle .. 1 fully active (affects brightness/size)
+  let smoothEnergy = 0;
+  let gestureHue = 260;    // target hue driven by current gesture
+  let currentHue = 260;    // smoothed, displayed hue
+  let hueDrift = 0;        // extra spin added by fast hand movement
+  let handsVisible = 0;
+  let rotAngle = 0;
+
+  function resetView() {
+    target = { x: cw / 2, y: ch / 2 };
+    smoothTarget = { x: cw / 2, y: ch / 2 };
+    prevSmoothTarget = { x: cw / 2, y: ch / 2 };
+    targetRadius = 90;
+    smoothRadius = 90;
+    gestureHue = 260;
+    hueDrift = 0;
+  }
+  resetView();
+  resetBtn.addEventListener('click', resetView);
+
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function mapRange(v, a, b, c, d) { return c + (clamp(v, a, b) - a) * (d - c) / (b - a); }
+  function lerpHue(a, b, t) {
+    let diff = ((b - a + 540) % 360) - 180;
+    return (a + diff * t + 360) % 360;
+  }
+
+  // ---------- MediaPipe Hands ----------
+  let hands, camStream, running = false, loopId = null;
+
+  function setupHands() {
+    hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+    hands.onResults(onResults);
+  }
+
+  function toScreen(lm) {
+    // mirror horizontally for a natural "mirror" feel
+    return { x: (1 - lm.x) * cw, y: lm.y * ch };
+  }
+
+  let lastHandPoints = null;
+
+  function onResults(results) {
+    const list = results.multiHandLandmarks || [];
+    handsVisible = list.length;
+
+    if (list.length === 2) {
+      const a = list[0].map(toScreen);
+      const b = list[1].map(toScreen);
+      const centerA = a[9], centerB = b[9];
+      target.x = (centerA.x + centerB.x) / 2;
+      target.y = (centerA.y + centerB.y) / 2;
+      const spread = dist(centerA, centerB);
+      targetRadius = clamp(spread * 0.55, 50, 280);
+      energy = 1;
+      const spreadNorm = clamp(spread / (cw * 0.85), 0, 1);
+      gestureHue = mapRange(spreadNorm, 0, 1, 140, 320); // green -> magenta as hands pull apart
+      lastHandPoints = [a, b];
+      statusEl.textContent = 'Tracking 2 hands — pull apart to grow';
+    } else if (list.length === 1) {
+      const p = list[0].map(toScreen);
+      target.x = p[9].x;
+      target.y = p[9].y;
+
+      const pinch = dist(p[4], p[8]);
+      const handSpan = Math.max(dist(p[0], p[9]), 30);
+      const ratio = pinch / handSpan;
+
+      const tips = [8, 12, 16, 20];
+      const avgTipDist = tips.reduce((s, i) => s + dist(p[i], p[0]), 0) / tips.length;
+      const curl = 1 - clamp(avgTipDist / (handSpan * 1.9), 0, 1); // 0 open .. 1 fist
+
+      if (curl > 0.55) {
+        // fist -> compact fireball
+        targetRadius = clamp(mapRange(curl, 0.55, 0.9, 90, 40), 35, 95);
+        gestureHue = mapRange(curl, 0.55, 0.9, 40, 5); // orange -> red
+        energy = 1;
+        statusEl.textContent = 'Fist detected — fire mode 🔥';
+      } else {
+        targetRadius = clamp(mapRange(ratio, 0.15, 1.3, 45, 220), 45, 220);
+        energy = clamp(mapRange(ratio, 0.15, 1.3, 0.15, 1), 0, 1);
+        gestureHue = mapRange(ratio, 0.15, 1.3, 190, 280); // cyan (pinched) -> purple (open)
+        statusEl.textContent = 'Tracking 1 hand — pinch to shrink, spread to grow';
+      }
+      lastHandPoints = [p];
+    } else {
+      lastHandPoints = null;
+      energy *= 0.98;
+      statusEl.textContent = running ? 'Show your hand to the camera' : statusEl.textContent;
+    }
+  }
+
+  async function startCamera() {
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, facingMode: 'user' },
+        audio: false
+      });
+      video.srcObject = camStream;
+      await video.play();
+      if (!hands) setupHands();
+      running = true;
+      camBtn.textContent = 'Stop Camera';
+      statusEl.textContent = 'Starting hand tracking…';
+      detectLoop();
+    } catch (err) {
+      console.error(err);
+      errorBox.style.display = 'flex';
+      statusEl.textContent = 'Camera blocked';
+    }
+  }
+
+  function stopCamera() {
+    running = false;
+    if (loopId) cancelAnimationFrame(loopId);
+    if (camStream) camStream.getTracks().forEach(t => t.stop());
+    handsVisible = 0;
+    lastHandPoints = null;
+    camBtn.textContent = 'Start Camera';
+    statusEl.textContent = 'Camera off';
+  }
+
+  camBtn.addEventListener('click', () => running ? stopCamera() : startCamera());
+
+  async function detectLoop() {
+    if (!running) return;
+    if (video.readyState >= 2) {
+      await hands.send({ image: video });
+    }
+    loopId = requestAnimationFrame(detectLoop);
+  }
+
+  // ---------- drawing helpers ----------
+  function drawVideoBackground() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return false;
+    const vRatio = vw / vh, cRatio = cw / ch;
+    let sx, sy, sw, sh;
+    if (vRatio > cRatio) { sh = vh; sw = vh * cRatio; sx = (vw - sw) / 2; sy = 0; }
+    else { sw = vw; sh = vw / cRatio; sx = 0; sy = (vh - sh) / 2; }
+
+    ctx.save();
+    ctx.translate(cw, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(5,4,10,0.38)';
+    ctx.fillRect(0, 0, cw, ch);
+    return true;
+  }
+
+  function drawSkeleton(bctx, points) {
+    const CONN = [
+      [0,1],[1,2],[2,3],[3,4],
+      [0,5],[5,6],[6,7],[7,8],
+      [5,9],[9,10],[10,11],[11,12],
+      [9,13],[13,14],[14,15],[15,16],
+      [13,17],[17,18],[18,19],[19,20],
+      [0,17]
+    ];
+    bctx.lineWidth = 1.4;
+    bctx.strokeStyle = 'rgba(230,225,255,0.6)';
+    points.forEach(handPts => {
+      bctx.beginPath();
+      CONN.forEach(([i, j]) => {
+        bctx.moveTo(handPts[i].x, handPts[i].y);
+        bctx.lineTo(handPts[j].x, handPts[j].y);
+      });
+      bctx.stroke();
+      handPts.forEach(p => {
+        bctx.beginPath();
+        bctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        bctx.fillStyle = 'rgba(240,235,255,0.75)';
+        bctx.fill();
+      });
+    });
+  }
+
+  // ---------- main render loop ----------
+  let lastT = performance.now();
+  function render(t) {
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+
+    const lerp = 1 - Math.pow(0.001, dt);
+    prevSmoothTarget.x = smoothTarget.x;
+    prevSmoothTarget.y = smoothTarget.y;
+    smoothTarget.x += (target.x - smoothTarget.x) * lerp;
+    smoothTarget.y += (target.y - smoothTarget.y) * lerp;
+    smoothRadius += (targetRadius - smoothRadius) * lerp;
+    smoothEnergy += (energy - smoothEnergy) * lerp;
+
+    // fast hand movement adds extra hue spin -> colors shift as you wave your hand
+    const speed = dist(smoothTarget, prevSmoothTarget) / Math.max(dt, 0.001);
+    const driftSpeedFactor = clamp(speed / 900, 0, 1);
+    hueDrift += dt * driftSpeedFactor * 220;
+    hueDrift %= 360;
+    const finalHue = (gestureHue + hueDrift) % 360;
+    currentHue = lerpHue(currentHue, finalHue, lerp * 0.5);
+
+    rotAngle += dt * (0.25 + smoothEnergy * 0.5);
+
+    // 1. background: face if camera running, else deep space
+    const hasVideo = running && drawVideoBackground();
+    if (!hasVideo) {
+      ctx.fillStyle = '#05040a';
+      ctx.fillRect(0, 0, cw, ch);
+    }
+
+    // 2. fade the particle buffer (keeps it transparent so it composites over the video)
+    pCtx.save();
+    pCtx.globalCompositeOperation = 'destination-out';
+    pCtx.fillStyle = 'rgba(0,0,0,0.16)';
+    pCtx.fillRect(0, 0, cw, ch);
+    pCtx.restore();
+
+    // 3. draw particle sphere onto the buffer
+    const cosA = Math.cos(rotAngle), sinA = Math.sin(rotAngle);
+    const sorted = particles.map(p => {
+      const rx = p.x * cosA - p.z * sinA;
+      const rz = p.x * sinA + p.z * cosA;
+      return { p, rx, rz };
+    }).sort((a, b) => a.rz - b.rz);
+
+    pCtx.save();
+    pCtx.globalCompositeOperation = 'lighter';
+    for (const { p, rx, rz } of sorted) {
+      const jitter = Math.sin(t * 0.002 + p.jitterPhase) * p.jitterAmt;
+      const rr = smoothRadius * (1 + jitter * 0.15);
+      const depth = (rz + 1) / 2;
+      const sx = smoothTarget.x + rx * rr;
+      const sy = smoothTarget.y + p.y * rr;
+      const size = 0.6 + depth * 1.8;
+      const twinkle = 0.5 + 0.5 * Math.sin(t * 0.004 + p.twinklePhase);
+      const alpha = (0.12 + depth * 0.55 * (0.6 + 0.4 * twinkle)) * (0.5 + smoothEnergy * 0.5);
+      const light = 55 + depth * 15;
+
+      pCtx.beginPath();
+      pCtx.arc(sx, sy, size, 0, Math.PI * 2);
+      pCtx.fillStyle = `hsla(${currentHue.toFixed(1)},85%,${light}%,${alpha.toFixed(2)})`;
+      pCtx.fill();
+    }
+    pCtx.restore();
+
+    // glow core
+    const grad = pCtx.createRadialGradient(
+      smoothTarget.x, smoothTarget.y, 0,
+      smoothTarget.x, smoothTarget.y, smoothRadius * 0.9
+    );
+    grad.addColorStop(0, `hsla(${currentHue.toFixed(1)},90%,65%,0.20)`);
+    grad.addColorStop(1, `hsla(${currentHue.toFixed(1)},90%,65%,0)`);
+    pCtx.fillStyle = grad;
+    pCtx.beginPath();
+    pCtx.arc(smoothTarget.x, smoothTarget.y, smoothRadius * 0.9, 0, Math.PI * 2);
+    pCtx.fill();
+
+    if (lastHandPoints) drawSkeleton(pCtx, lastHandPoints);
+
+    // 4. composite particle buffer over the video/background
+    ctx.drawImage(pCanvas, 0, 0, cw, ch);
+
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
